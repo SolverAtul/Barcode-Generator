@@ -1,0 +1,260 @@
+import { useEffect, useRef, useState, useCallback } from "react";
+import JsBarcode from "jsbarcode";
+
+function useSpeechRecognition() {
+  const [supported, setSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SR) {
+      setSupported(true);
+      const r = new SR();
+      r.continuous = false;
+      r.interimResults = true;
+      r.lang = "en-US";
+      recognitionRef.current = r;
+    }
+  }, []);
+
+  return { supported, recognition: recognitionRef };
+}
+
+function Barcode({ value, format }: { value: string; format: string }) {
+  const ref = useRef<SVGSVGElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ref.current || !value.trim()) return;
+    try {
+      JsBarcode(ref.current, value, {
+        format,
+        width: 2,
+        height: 110,
+        displayValue: true,
+        fontSize: 16,
+        margin: 12,
+        background: "#ffffff",
+        lineColor: "#0f172a",
+      });
+      setError(null);
+    } catch (e: any) {
+      setError(e?.message || "Could not generate barcode for this text in the chosen format.");
+    }
+  }, [value, format]);
+
+  if (!value.trim()) return null;
+
+  return (
+    <div className="w-full">
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          {error}
+          <div className="mt-1 text-destructive/80">Try CODE128 — it accepts any text.</div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3 rounded-2xl border bg-white p-6 shadow-sm">
+          <svg ref={ref} className="max-w-full" />
+          <button
+            onClick={() => downloadSvg(ref.current)}
+            className="text-xs text-muted-foreground hover:text-foreground transition"
+          >
+            Download SVG
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function downloadSvg(svg: SVGSVGElement | null) {
+  if (!svg) return;
+  const data = new XMLSerializer().serializeToString(svg);
+  const blob = new Blob([data], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `barcode-${Date.now()}.svg`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function MicIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10v2a7 7 0 0 0 14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+    </svg>
+  );
+}
+
+function isInIframe() {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+export default function App() {
+  const [text, setText] = useState("");
+  const [interim, setInterim] = useState("");
+  const [listening, setListening] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const { supported, recognition } = useSpeechRecognition();
+  const inIframe = isInIframe();
+
+  const friendlyError = (code: string) => {
+    switch (code) {
+      case "not-allowed":
+      case "service-not-allowed":
+      case "permission-denied":
+        return "Microphone permission was blocked. If you're viewing inside the preview pane, open the app in a new tab and allow mic access.";
+      case "no-speech":
+        return "I didn't hear anything. Tap the mic and try again.";
+      case "audio-capture":
+        return "No microphone was found on this device.";
+      case "network":
+        return "Network error reaching the speech service.";
+      default:
+        return code || "Microphone error";
+    }
+  };
+
+  const start = useCallback(async () => {
+    const r = recognition.current;
+    if (!r) return;
+    setErr(null);
+    setInterim("");
+
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    } catch (e: any) {
+      setErr(friendlyError(e?.name === "NotAllowedError" ? "not-allowed" : e?.message || "audio-capture"));
+      return;
+    }
+
+    r.onresult = (event: any) => {
+      let finalText = "";
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const res = event.results[i];
+        if (res.isFinal) finalText += res[0].transcript;
+        else interimText += res[0].transcript;
+      }
+      if (finalText) setText((prev) => (prev ? prev + " " : "") + finalText.trim());
+      setInterim(interimText);
+    };
+    r.onerror = (e: any) => {
+      setErr(friendlyError(e?.error || ""));
+    };
+    r.onend = () => {
+      setListening(false);
+      setInterim("");
+    };
+    try {
+      r.start();
+      setListening(true);
+    } catch (e: any) {
+      setErr(e?.message || "Could not start microphone");
+    }
+  }, [recognition]);
+
+  const stop = useCallback(() => {
+    recognition.current?.stop();
+  }, [recognition]);
+
+  const display = text + (interim ? " " + interim : "");
+
+  return (
+    <div className="min-h-screen w-full flex items-start justify-center px-4 py-12 bg-gradient-to-br from-background via-background to-primary/5">
+      <div className="w-full max-w-2xl">
+        <div className="text-center mb-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
+            Instant Barcode Generator
+          </div>
+        </div>
+
+        {inIframe && supported && (
+          <div className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-3 text-xs flex items-center justify-between gap-3">
+            <span>For mic access to work, open the app in its own tab.</span>
+            <a
+              href={window.location.href}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 rounded-md bg-primary text-primary-foreground px-2.5 py-1 text-xs font-medium hover:opacity-90"
+            >
+              Open in new tab
+            </a>
+          </div>
+        )}
+
+        <div className="relative rounded-2xl border bg-card shadow-sm">
+          <textarea
+            autoFocus
+            value={display}
+            onChange={(e) => {
+              setText(e.target.value);
+              setInterim("");
+            }}
+            placeholder="Paste or type your text here…"
+            className="w-full min-h-[160px] rounded-2xl bg-transparent p-4 pr-16 text-base focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+          />
+          {supported && (
+            <button
+              onClick={listening ? stop : start}
+              title={listening ? "Stop recording" : "Speak it"}
+              className={`absolute bottom-3 right-3 flex items-center justify-center w-12 h-12 rounded-full transition-all ${
+                listening
+                  ? "bg-destructive text-destructive-foreground"
+                  : "bg-accent text-accent-foreground hover:scale-105"
+              }`}
+            >
+              {listening && (
+                <span className="absolute inset-0 rounded-full bg-destructive/40 animate-ping" />
+              )}
+              <MicIcon />
+            </button>
+          )}
+        </div>
+
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            {listening
+              ? "Listening… tap the mic to stop."
+              : supported
+              ? "Paste, type, or tap the mic to dictate."
+              : "Paste or type your text. (Voice input not supported in this browser.)"}
+          </p>
+          {(text || interim) && (
+            <button
+              onClick={() => {
+                setText("");
+                setInterim("");
+                setErr(null);
+              }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {err && <div className="mt-2 text-xs text-destructive">Mic error: {err}</div>}
+
+        <div className="mt-6">
+          <Barcode value={text} format="CODE128" />
+          {!text.trim() && (
+            <div className="rounded-2xl border border-dashed bg-card/50 p-10 text-center text-sm text-muted-foreground">
+              Your barcode will appear here automatically.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
