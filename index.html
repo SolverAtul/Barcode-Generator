@@ -1,259 +1,398 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Instant Barcode Generator</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.12.3/dist/JsBarcode.all.min.js"></script>
-  <style>
-    :root {
-      --background: #fafafa;
-      --card: #ffffff;
-      --foreground: #0f172a;
-      --muted-foreground: #64748b;
-      --border: #e2e8f0;
-      --primary: #6366f1;
-      --primary-foreground: #ffffff;
-      --accent: #10b981;
-      --accent-foreground: #ffffff;
-      --destructive: #ef4444;
-      --destructive-foreground: #ffffff;
-      --ring: #6366f1;
+import { useEffect, useRef, useState, useCallback } from "react";
+import JsBarcode from "jsbarcode";
+
+function useSpeechRecognition() {
+  const [supported, setSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SR) {
+      setSupported(true);
+      const r = new SR();
+      r.continuous = false;
+      r.interimResults = true;
+      r.lang = "en-US";
+      recognitionRef.current = r;
     }
-    body {
-      background: linear-gradient(135deg, var(--background), var(--background), rgba(99, 102, 241, 0.08));
-      color: var(--foreground);
-      min-height: 100vh;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }, []);
+
+  return { supported, recognition: recognitionRef };
+}
+
+function Barcode({
+  value,
+  format,
+  onSave,
+  savedFlash,
+}: {
+  value: string;
+  format: string;
+  onSave: () => void;
+  savedFlash: boolean;
+}) {
+  const ref = useRef<SVGSVGElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ref.current || !value.trim()) return;
+    try {
+      JsBarcode(ref.current, value, {
+        format,
+        width: 2,
+        height: 110,
+        displayValue: true,
+        fontSize: 16,
+        margin: 12,
+        background: "#ffffff",
+        lineColor: "#0f172a",
+      });
+      setError(null);
+    } catch (e: any) {
+      setError(e?.message || "Could not generate barcode for this text in the chosen format.");
     }
-    .bg-card { background: var(--card); }
-    .text-muted-foreground { color: var(--muted-foreground); }
-    .text-primary { color: var(--primary); }
-    .bg-primary { background: var(--primary); }
-    .text-primary-foreground { color: var(--primary-foreground); }
-    .bg-primary\/5 { background: rgba(99, 102, 241, 0.05); }
-    .bg-primary\/10 { background: rgba(99, 102, 241, 0.10); }
-    .border-primary\/30 { border-color: rgba(99, 102, 241, 0.30); }
-    .bg-accent { background: var(--accent); }
-    .text-accent-foreground { color: var(--accent-foreground); }
-    .bg-destructive { background: var(--destructive); }
-    .text-destructive { color: var(--destructive); }
-    .text-destructive-foreground { color: var(--destructive-foreground); }
-    .bg-destructive\/5 { background: rgba(239, 68, 68, 0.05); }
-    .bg-destructive\/40 { background: rgba(239, 68, 68, 0.40); }
-    .border-destructive\/30 { border-color: rgba(239, 68, 68, 0.30); }
-    .text-destructive\/80 { color: rgba(239, 68, 68, 0.80); }
-    .focus\:ring-ring:focus { --tw-ring-color: var(--ring); }
-    .border { border: 1px solid var(--border); }
-    .border-dashed { border-style: dashed; }
-    .bg-card\/50 { background: rgba(255, 255, 255, 0.5); }
-  </style>
-</head>
-<body>
-  <div class="min-h-screen w-full flex items-start justify-center px-4 py-12">
-    <div class="w-full max-w-2xl">
-      <div class="text-center mb-6">
-        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-          Instant Barcode Generator
+  }, [value, format]);
+
+  if (!value.trim()) return null;
+
+  return (
+    <div className="w-full">
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          {error}
+          <div className="mt-1 text-destructive/80">Try CODE128 — it accepts any text.</div>
         </div>
-      </div>
-
-      <div id="iframe-banner" class="hidden mb-4 rounded-xl border border-primary/30 bg-primary/5 p-3 text-xs items-center justify-between gap-3">
-        <span>For mic access to work, open the app in its own tab.</span>
-        <a id="open-tab" href="#" target="_blank" rel="noreferrer"
-           class="shrink-0 rounded-md bg-primary text-primary-foreground px-2.5 py-1 text-xs font-medium hover:opacity-90">
-          Open in new tab
-        </a>
-      </div>
-
-      <div class="relative rounded-2xl border bg-card shadow-sm">
-        <textarea id="text" autofocus placeholder="Paste or type your text here…"
-          class="w-full min-h-[160px] rounded-2xl bg-transparent p-4 pr-16 text-base focus:outline-none focus:ring-2 focus:ring-ring resize-none"></textarea>
-        <button id="mic-btn" type="button"
-          class="hidden absolute bottom-3 right-3 items-center justify-center w-12 h-12 rounded-full transition-all bg-accent text-accent-foreground hover:scale-105">
-          <span id="mic-pulse" class="hidden absolute inset-0 rounded-full bg-destructive/40 animate-ping"></span>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-            <path d="M5 10v2a7 7 0 0 0 14 0v-2"></path>
-            <line x1="12" y1="19" x2="12" y2="22"></line>
-          </svg>
-        </button>
-      </div>
-
-      <div class="mt-2 flex items-center justify-between gap-2">
-        <p id="hint" class="text-xs text-muted-foreground">Paste or type your text.</p>
-        <button id="clear-btn" class="hidden text-xs text-muted-foreground hover:opacity-80">Clear</button>
-      </div>
-
-      <div id="err" class="hidden mt-2 text-xs text-destructive"></div>
-
-      <div class="mt-6">
-        <div id="barcode-card" class="hidden flex-col items-center gap-3 rounded-2xl border bg-white p-6 shadow-sm">
-          <svg id="barcode" class="max-w-full"></svg>
-          <button id="download-btn" class="text-xs text-muted-foreground hover:opacity-80">Download SVG</button>
+      ) : (
+        <div className="flex flex-col items-center gap-3 rounded-2xl border bg-white p-6 shadow-sm">
+          <svg ref={ref} className="max-w-full" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onSave}
+              className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:opacity-90"
+            >
+              {savedFlash ? "Saved ✓" : "Save to history"}
+            </button>
+            <button
+              onClick={() => downloadSvg(ref.current)}
+              className="rounded-md border bg-card px-3 py-1.5 text-xs hover:bg-muted transition"
+            >
+              Download SVG
+            </button>
+          </div>
         </div>
-        <div id="barcode-error" class="hidden rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-          <span id="barcode-error-msg"></span>
-          <div class="mt-1 text-destructive/80">Try shorter or simpler text.</div>
+      )}
+    </div>
+  );
+}
+
+function downloadSvg(svg: SVGSVGElement | null) {
+  if (!svg) return;
+  const data = new XMLSerializer().serializeToString(svg);
+  const blob = new Blob([data], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `barcode-${Date.now()}.svg`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function MicIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10v2a7 7 0 0 0 14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+    </svg>
+  );
+}
+
+function isInIframe() {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+const HISTORY_KEY = "barcode-history-v1";
+
+type HistoryMap = Record<string, number>;
+
+function loadHistory(): HistoryMap {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveHistory(h: HistoryMap) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+function todayKey() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDate(key: string) {
+  try {
+    const [y, m, d] = key.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return key;
+  }
+}
+
+export default function App() {
+  const [text, setText] = useState("");
+  const [interim, setInterim] = useState("");
+  const [listening, setListening] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryMap>(() => loadHistory());
+  const [showHistory, setShowHistory] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const { supported, recognition } = useSpeechRecognition();
+  const inIframe = isInIframe();
+
+  const today = todayKey();
+  const todayCount = history[today] || 0;
+  const totalCount = Object.values(history).reduce((a, b) => a + b, 0);
+
+  const recordBarcode = () => {
+    const key = todayKey();
+    setHistory((prev) => {
+      const next = { ...prev, [key]: (prev[key] || 0) + 1 };
+      saveHistory(next);
+      return next;
+    });
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1200);
+  };
+
+  const clearHistory = () => {
+    if (!confirm("Clear all saved barcode counts?")) return;
+    setHistory({});
+    saveHistory({});
+  };
+
+  const friendlyError = (code: string) => {
+    switch (code) {
+      case "not-allowed":
+      case "service-not-allowed":
+      case "permission-denied":
+        return "Microphone permission was blocked. If you're viewing inside the preview pane, open the app in a new tab and allow mic access.";
+      case "no-speech":
+        return "I didn't hear anything. Tap the mic and try again.";
+      case "audio-capture":
+        return "No microphone was found on this device.";
+      case "network":
+        return "Network error reaching the speech service.";
+      default:
+        return code || "Microphone error";
+    }
+  };
+
+  const start = useCallback(async () => {
+    const r = recognition.current;
+    if (!r) return;
+    setErr(null);
+    setInterim("");
+
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    } catch (e: any) {
+      setErr(friendlyError(e?.name === "NotAllowedError" ? "not-allowed" : e?.message || "audio-capture"));
+      return;
+    }
+
+    r.onresult = (event: any) => {
+      let finalText = "";
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const res = event.results[i];
+        if (res.isFinal) finalText += res[0].transcript;
+        else interimText += res[0].transcript;
+      }
+      if (finalText) setText((prev) => (prev ? prev + " " : "") + finalText.trim());
+      setInterim(interimText);
+    };
+    r.onerror = (e: any) => {
+      setErr(friendlyError(e?.error || ""));
+    };
+    r.onend = () => {
+      setListening(false);
+      setInterim("");
+    };
+    try {
+      r.start();
+      setListening(true);
+    } catch (e: any) {
+      setErr(e?.message || "Could not start microphone");
+    }
+  }, [recognition]);
+
+  const stop = useCallback(() => {
+    recognition.current?.stop();
+  }, [recognition]);
+
+  const display = text + (interim ? " " + interim : "");
+
+  return (
+    <div className="min-h-screen w-full flex items-start justify-center px-4 py-12 bg-gradient-to-br from-background via-background to-primary/5">
+      <div className="w-full max-w-2xl">
+        <div className="flex items-center justify-between mb-6 gap-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
+            Instant Barcode Generator
+          </div>
+          <button
+            onClick={() => setShowHistory((s) => !s)}
+            className="inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs hover:bg-muted transition"
+            title="Daily barcode counts"
+          >
+            <span className="text-muted-foreground">Today</span>
+            <span className="font-semibold text-foreground">{todayCount}</span>
+            <span className="text-muted-foreground">·</span>
+            <span className="text-muted-foreground">All-time</span>
+            <span className="font-semibold text-foreground">{totalCount}</span>
+          </button>
         </div>
-        <div id="empty" class="rounded-2xl border border-dashed bg-card/50 p-10 text-center text-sm text-muted-foreground">
-          Your barcode will appear here automatically.
+
+        {inIframe && supported && (
+          <div className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-3 text-xs flex items-center justify-between gap-3">
+            <span>For mic access to work, open the app in its own tab.</span>
+            <a
+              href={window.location.href}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 rounded-md bg-primary text-primary-foreground px-2.5 py-1 text-xs font-medium hover:opacity-90"
+            >
+              Open in new tab
+            </a>
+          </div>
+        )}
+
+        <div className="relative rounded-2xl border bg-card shadow-sm">
+          <textarea
+            autoFocus
+            value={display}
+            onChange={(e) => {
+              setText(e.target.value);
+              setInterim("");
+            }}
+            placeholder="Paste or type your text here…"
+            className="w-full min-h-[160px] rounded-2xl bg-transparent p-4 pr-16 text-base focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+          />
+          {supported && (
+            <button
+              onClick={listening ? stop : start}
+              title={listening ? "Stop recording" : "Speak it"}
+              className={`absolute bottom-3 right-3 flex items-center justify-center w-12 h-12 rounded-full transition-all ${
+                listening
+                  ? "bg-destructive text-destructive-foreground"
+                  : "bg-accent text-accent-foreground hover:scale-105"
+              }`}
+            >
+              {listening && (
+                <span className="absolute inset-0 rounded-full bg-destructive/40 animate-ping" />
+              )}
+              <MicIcon />
+            </button>
+          )}
         </div>
+
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            {listening
+              ? "Listening… tap the mic to stop."
+              : supported
+              ? "Paste, type, or tap the mic to dictate."
+              : "Paste or type your text. (Voice input not supported in this browser.)"}
+          </p>
+          {(text || interim) && (
+            <button
+              onClick={() => {
+                setText("");
+                setInterim("");
+                setErr(null);
+              }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {err && <div className="mt-2 text-xs text-destructive">Mic error: {err}</div>}
+
+        <div className="mt-6">
+          <Barcode value={text} format="CODE128" onSave={recordBarcode} savedFlash={savedFlash} />
+          {!text.trim() && (
+            <div className="rounded-2xl border border-dashed bg-card/50 p-10 text-center text-sm text-muted-foreground">
+              Your barcode will appear here automatically.
+            </div>
+          )}
+        </div>
+
+        {showHistory && (
+          <div className="mt-6 rounded-2xl border bg-card shadow-sm">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <h3 className="text-sm font-semibold">Barcode history</h3>
+                <p className="text-xs text-muted-foreground">
+                  {totalCount} saved across {Object.keys(history).length} day{Object.keys(history).length === 1 ? "" : "s"}
+                </p>
+              </div>
+              {Object.keys(history).length > 0 && (
+                <button
+                  onClick={clearHistory}
+                  className="text-xs text-destructive hover:opacity-80"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+            {Object.keys(history).length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">
+                No barcodes saved yet. Generate one above and tap "Save to history".
+              </div>
+            ) : (
+              <ul className="divide-y">
+                {Object.keys(history)
+                  .sort((a, b) => (a < b ? 1 : -1))
+                  .map((k) => (
+                    <li key={k} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                      <span className={k === today ? "font-medium" : ""}>
+                        {formatDate(k)}
+                        {k === today && (
+                          <span className="ml-2 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium">
+                            Today
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-semibold tabular-nums">{history[k]}</span>
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </div>
-  </div>
-
-  <script>
-    (function () {
-      const textEl = document.getElementById('text');
-      const micBtn = document.getElementById('mic-btn');
-      const micPulse = document.getElementById('mic-pulse');
-      const hint = document.getElementById('hint');
-      const clearBtn = document.getElementById('clear-btn');
-      const errEl = document.getElementById('err');
-      const barcodeCard = document.getElementById('barcode-card');
-      const barcodeSvg = document.getElementById('barcode');
-      const barcodeError = document.getElementById('barcode-error');
-      const barcodeErrorMsg = document.getElementById('barcode-error-msg');
-      const empty = document.getElementById('empty');
-      const downloadBtn = document.getElementById('download-btn');
-      const banner = document.getElementById('iframe-banner');
-      const openTab = document.getElementById('open-tab');
-
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      let recognition = null;
-      let listening = false;
-      let baseText = '';
-      let interim = '';
-
-      function inIframe() { try { return window.self !== window.top; } catch { return true; } }
-
-      function render() {
-        const value = textEl.value.trim();
-        clearBtn.classList.toggle('hidden', !value);
-        if (!value) {
-          barcodeCard.classList.add('hidden');
-          barcodeCard.classList.remove('flex');
-          barcodeError.classList.add('hidden');
-          empty.classList.remove('hidden');
-          return;
-        }
-        empty.classList.add('hidden');
-        try {
-          JsBarcode(barcodeSvg, value, {
-            format: 'CODE128', width: 2, height: 110, displayValue: true,
-            fontSize: 16, margin: 12, background: '#ffffff', lineColor: '#0f172a',
-          });
-          barcodeError.classList.add('hidden');
-          barcodeCard.classList.remove('hidden');
-          barcodeCard.classList.add('flex');
-        } catch (e) {
-          barcodeCard.classList.add('hidden');
-          barcodeCard.classList.remove('flex');
-          barcodeError.classList.remove('hidden');
-          barcodeErrorMsg.textContent = (e && e.message) || 'Could not generate barcode for this text.';
-        }
-      }
-
-      textEl.addEventListener('input', () => { baseText = textEl.value; interim = ''; render(); });
-      clearBtn.addEventListener('click', () => {
-        baseText = ''; interim = ''; textEl.value = '';
-        errEl.classList.add('hidden'); render(); textEl.focus();
-      });
-      downloadBtn.addEventListener('click', () => {
-        const data = new XMLSerializer().serializeToString(barcodeSvg);
-        const blob = new Blob([data], { type: 'image/svg+xml;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'barcode-' + Date.now() + '.svg'; a.click();
-        URL.revokeObjectURL(url);
-      });
-
-      function friendlyError(code) {
-        switch (code) {
-          case 'not-allowed': case 'service-not-allowed': case 'permission-denied':
-            return "Microphone permission was blocked. Allow mic access in your browser settings.";
-          case 'no-speech': return "I didn't hear anything. Tap the mic and try again.";
-          case 'audio-capture': return "No microphone was found on this device.";
-          case 'network': return "Network error reaching the speech service.";
-          default: return code || 'Microphone error';
-        }
-      }
-
-      function setListening(on) {
-        listening = on;
-        if (on) {
-          micBtn.classList.remove('bg-accent', 'text-accent-foreground');
-          micBtn.classList.add('bg-destructive', 'text-destructive-foreground');
-          micPulse.classList.remove('hidden');
-          hint.textContent = 'Listening… tap the mic to stop.';
-        } else {
-          micBtn.classList.add('bg-accent', 'text-accent-foreground');
-          micBtn.classList.remove('bg-destructive', 'text-destructive-foreground');
-          micPulse.classList.add('hidden');
-          hint.textContent = SR ? 'Paste, type, or tap the mic to dictate.' : 'Paste or type your text.';
-        }
-      }
-
-      async function startListening() {
-        if (!recognition) return;
-        errEl.classList.add('hidden'); interim = '';
-        try {
-          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            stream.getTracks().forEach(t => t.stop());
-          }
-        } catch (e) {
-          errEl.textContent = 'Mic error: ' + friendlyError(e && e.name === 'NotAllowedError' ? 'not-allowed' : (e && e.message) || 'audio-capture');
-          errEl.classList.remove('hidden'); return;
-        }
-        try { recognition.start(); setListening(true); }
-        catch (e) {
-          errEl.textContent = 'Mic error: ' + (e && e.message || 'Could not start microphone');
-          errEl.classList.remove('hidden');
-        }
-      }
-      function stopListening() { if (recognition) recognition.stop(); }
-
-      if (SR) {
-        recognition = new SR();
-        recognition.continuous = false;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-        recognition.onresult = (event) => {
-          let finalText = '', interimText = '';
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const res = event.results[i];
-            if (res.isFinal) finalText += res[0].transcript;
-            else interimText += res[0].transcript;
-          }
-          if (finalText) baseText = (baseText ? baseText + ' ' : '') + finalText.trim();
-          interim = interimText;
-          textEl.value = baseText + (interim ? ' ' + interim : '');
-          render();
-        };
-        recognition.onerror = (e) => {
-          errEl.textContent = 'Mic error: ' + friendlyError(e && e.error || '');
-          errEl.classList.remove('hidden');
-        };
-        recognition.onend = () => {
-          interim = ''; textEl.value = baseText; setListening(false); render();
-        };
-        micBtn.classList.remove('hidden'); micBtn.classList.add('flex');
-        hint.textContent = 'Paste, type, or tap the mic to dictate.';
-        micBtn.addEventListener('click', () => { if (listening) stopListening(); else startListening(); });
-      } else {
-        hint.textContent = 'Paste or type your text. (Voice input not supported in this browser.)';
-      }
-
-      if (inIframe() && SR) {
-        banner.classList.remove('hidden');
-        banner.classList.add('flex');
-        openTab.href = window.location.href;
-      }
-      render();
-    })();
-  </script>
-</body>
-</html>
+  );
+}
